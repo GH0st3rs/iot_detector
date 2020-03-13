@@ -59,7 +59,19 @@ func request(target string, port string, shema string) (string, bool) {
 	}
 	// build a new request, but not doing the POST yet
 	url := fmt.Sprintf("%s://%s:%s%s", shema, target, port, GLOBAL_REQUEST.Path)
-	req, err := http.NewRequest(GLOBAL_REQUEST.Method, url, bytes.NewBuffer([]byte(GLOBAL_REQUEST.Data)))
+	// Check POST and GET requests
+	var req *http.Request
+	var err error
+	if GLOBAL_REQUEST.Method == "POST" {
+		req, err = http.NewRequest(GLOBAL_REQUEST.Method, url, bytes.NewBuffer([]byte(GLOBAL_REQUEST.Data)))
+	} else if GLOBAL_REQUEST.Method == "GET" {
+		if len(GLOBAL_REQUEST.Data) > 0 {
+			url += "?" + GLOBAL_REQUEST.Data
+		}
+		req, err = http.NewRequest(GLOBAL_REQUEST.Method, url, nil)
+	} else {
+		return "[WRONG METHOD]", false
+	}
 	if err != nil {
 		return "[ERROR CONNECT]", false
 	}
