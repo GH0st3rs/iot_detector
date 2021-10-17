@@ -42,6 +42,6 @@ Usage of ./iot_detector:
 
 ## Run or install
 ```bash
-$ go build $(pwd)
+$ go build .
 $ ./iot_detector ...
 ```
