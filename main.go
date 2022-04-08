@@ -30,9 +30,19 @@ type Request struct {
 	Data    string            `json:"data"`
 }
 
+type OutputStruct struct {
+	thread_id int
+	ip        string
+	port      string
+	answer    string
+}
+
 var THREADS_COUNT int
 var VERBOSE bool
 var GLOBAL_REQUEST Request
+var AUTOSCHEME bool
+
+var scheme_array = []string{"http://", "https://"}
 
 func load_request_from_file(filename string) error {
 	jsonFile, err := os.Open(filename)
@@ -50,15 +60,16 @@ func load_request_from_file(filename string) error {
 	return nil
 }
 
-func request(target string, port string, shema string) (string, bool) {
-	if shema == "https" {
-		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	client := &http.Client{
-		Timeout: 10 * time.Second,
+func request(target string, port string, client *http.Client) (string, bool) {
+	if strings.Contains("https", target) {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		t.MaxIdleConns = 10
+		t.IdleConnTimeout = 30 * time.Second
+		client.Transport = t
 	}
 	// build a new request, but not doing the POST yet
-	url := fmt.Sprintf("%s://%s:%s%s", shema, target, port, GLOBAL_REQUEST.Path)
+	url := fmt.Sprintf("%s:%s%s", target, port, GLOBAL_REQUEST.Path)
 	// Check POST and GET requests
 	var req *http.Request
 	var err error
@@ -81,29 +92,43 @@ func request(target string, port string, shema string) (string, bool) {
 	}
 	// now POST it
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		return "[NO RESPONSE]", false
+	if err != nil {
+		return fmt.Sprintf("[NO RESPONSE] => %s", err.Error()), false
+	} else if resp.StatusCode != 200 {
+		return "[WRONG RESPONSE]", false
 	}
 	defer resp.Body.Close()
 	answer, err := ioutil.ReadAll(resp.Body)
 	if strings.Contains(string(answer), GLOBAL_REQUEST.Search) {
-		return "SUCCESS", true
+		return "[SUCCESS]", true
 	}
 	return "[NOT DETECTED]", false
 }
 
-func worker(thread_num int, jobs chan ListItem, wg *sync.WaitGroup) {
+func worker(thread_num int, jobs chan ListItem, wg *sync.WaitGroup, output chan OutputStruct, c *http.Client) {
+	var answer, host string
+	var status bool
+	var result OutputStruct
 	for v := range jobs {
-		status := false
-		answer := ""
-		for _, shema := range []string{"https", "http"} {
-			answer, status = request(v.ip, v.port, shema)
-			if status == true {
-				break
+		status = false
+		answer = ""
+		if AUTOSCHEME == true {
+			for _, scheme := range scheme_array {
+				host = scheme + v.ip
+				answer, status = request(host, v.port, c)
+				if status == true {
+					break
+				}
 			}
+		} else {
+			answer, status = request(v.ip, v.port, c)
 		}
 		if status == true || VERBOSE == true {
-			fmt.Printf("{%d}\t%s\t%s\t%s\n", thread_num, v.ip, v.port, answer)
+			result.answer = answer
+			result.ip = v.ip
+			result.port = v.port
+			result.thread_id = thread_num
+			output <- result
 		}
 	}
 	wg.Done()
@@ -116,11 +141,12 @@ func main() {
 	flag.StringVar(&iplist, "l", "", "List of ip,port")
 	flag.StringVar(&request_file, "r", "", "Json request file")
 	flag.BoolVar(&VERBOSE, "v", false, "Verbose")
+	flag.BoolVar(&AUTOSCHEME, "a", false, "Auto URL scheme")
 	flag.Parse()
 
 	numcpu := runtime.NumCPU()
 	fmt.Println("NumCPU", numcpu)
-	runtime.GOMAXPROCS(numcpu)
+	runtime.GOMAXPROCS(1)
 
 	err := load_request_from_file(request_file)
 	if err != nil {
@@ -130,8 +156,13 @@ func main() {
 
 	jobs := make(chan ListItem, 100)
 	wg := sync.WaitGroup{}
+	output := make(chan OutputStruct)
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
 	for i := 1; i < THREADS_COUNT; i++ {
-		go worker(i, jobs, &wg)
+		go worker(i, jobs, &wg, output, client)
 		wg.Add(1)
 	}
 
@@ -141,6 +172,13 @@ func main() {
 	}
 	defer file.Close()
 
+	// print output
+	go func() {
+		for line := range output {
+			fmt.Printf("{%d}\t%s\t%s\t%s\n", line.thread_id, line.ip, line.port, line.answer)
+		}
+	}()
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -149,10 +187,7 @@ func main() {
 		jobs <- item
 	}
 
-	if err := scanner.Err(); err != nil {
-		panic(err)
-	}
-
 	close(jobs)
 	wg.Wait()
+	close(output)
 }
