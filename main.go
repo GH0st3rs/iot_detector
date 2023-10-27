@@ -9,9 +9,12 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,12 +40,14 @@ type OutputStruct struct {
 	answer    string
 }
 
-var THREADS_COUNT int
-var VERBOSE bool
-var GLOBAL_REQUEST Request
-var AUTOSCHEME bool
-
-var scheme_array = []string{"http://", "https://"}
+var (
+	THREADS_COUNT  int
+	VERBOSE        bool
+	GLOBAL_REQUEST Request
+	AUTOSCHEME     bool
+	scheme_array   = []string{"http://", "https://"}
+	PORTS          string
+)
 
 func load_request_from_file(filename string) error {
 	jsonFile, err := os.Open(filename)
@@ -58,6 +63,17 @@ func load_request_from_file(filename string) error {
 		return err
 	}
 	return nil
+}
+
+func port_check(target string, port string) bool {
+	address := fmt.Sprintf("%s:%s", target, port)
+	timeout := 1 * time.Second
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func request(target string, port string, client *http.Client) (string, bool) {
@@ -99,10 +115,45 @@ func request(target string, port string, client *http.Client) (string, bool) {
 	}
 	defer resp.Body.Close()
 	answer, err := ioutil.ReadAll(resp.Body)
-	if strings.Contains(string(answer), GLOBAL_REQUEST.Search) {
+	if search_patterns(string(answer), GLOBAL_REQUEST.Search) {
 		return "[SUCCESS]", true
 	}
 	return "[NOT DETECTED]", false
+}
+
+func search_patterns(text, search string) bool {
+	re, err := regexp.Compile(search)
+	if err != nil {
+		return strings.Contains(text, search)
+	}
+	return re.MatchString(text)
+}
+
+func parsePorts(portArg string) []int {
+	var ports []int
+
+	if portArg == "" {
+		return ports
+	}
+
+	ranges := strings.Split(portArg, ",")
+
+	for _, r := range ranges {
+		if strings.Contains(r, "-") {
+			bounds := strings.Split(r, "-")
+			start, _ := strconv.Atoi(bounds[0])
+			end, _ := strconv.Atoi(bounds[1])
+
+			for port := start; port <= end; port++ {
+				ports = append(ports, port)
+			}
+		} else {
+			port, _ := strconv.Atoi(r)
+			ports = append(ports, port)
+		}
+	}
+
+	return ports
 }
 
 func worker(thread_num int, jobs chan ListItem, wg *sync.WaitGroup, output chan OutputStruct, c *http.Client) {
@@ -112,18 +163,20 @@ func worker(thread_num int, jobs chan ListItem, wg *sync.WaitGroup, output chan 
 	for v := range jobs {
 		status = false
 		answer = ""
-		if AUTOSCHEME == true {
-			for _, scheme := range scheme_array {
-				host = scheme + v.ip
-				answer, status = request(host, v.port, c)
-				if status == true {
-					break
+		if port_check(v.ip, v.port) {
+			if AUTOSCHEME {
+				for _, scheme := range scheme_array {
+					host = scheme + v.ip
+					answer, status = request(host, v.port, c)
+					if status {
+						break
+					}
 				}
+			} else {
+				answer, status = request(v.ip, v.port, c)
 			}
-		} else {
-			answer, status = request(v.ip, v.port, c)
 		}
-		if status == true || VERBOSE == true {
+		if status || VERBOSE {
 			result.answer = answer
 			result.ip = v.ip
 			result.port = v.port
@@ -138,10 +191,11 @@ func main() {
 	var iplist string
 	var request_file string
 	flag.IntVar(&THREADS_COUNT, "t", 1000, "Thread count")
-	flag.StringVar(&iplist, "l", "", "List of ip,port")
+	flag.StringVar(&iplist, "l", "", "List of ip")
 	flag.StringVar(&request_file, "r", "", "Json request file")
 	flag.BoolVar(&VERBOSE, "v", false, "Verbose")
 	flag.BoolVar(&AUTOSCHEME, "a", false, "Auto URL scheme")
+	flag.StringVar(&PORTS, "p", "", "Ports to scan (e.g. 22, 80,443, 1000-2000)")
 	flag.Parse()
 
 	numcpu := runtime.NumCPU()
@@ -180,11 +234,19 @@ func main() {
 	}()
 
 	scanner := bufio.NewScanner(file)
+	ports := parsePorts(PORTS)
 	for scanner.Scan() {
 		line := scanner.Text()
 		splitted_data := strings.Split(line, ",")
-		item := ListItem{ip: splitted_data[0], port: splitted_data[1]}
-		jobs <- item
+		if len(splitted_data) == 2 {
+			item := ListItem{ip: splitted_data[0], port: splitted_data[1]}
+			jobs <- item
+		} else {
+			for _, port := range ports {
+				item := ListItem{ip: splitted_data[0], port: fmt.Sprint(port)}
+				jobs <- item
+			}
+		}
 	}
 
 	close(jobs)

@@ -5,8 +5,11 @@ A multithreaded scanner for detecting IoT devices, which allows you to identify 
 ## Usage
 ```bash
 Usage of ./iot_detector:
+  -a    Auto URL scheme
   -l string
         List of ip,port
+  -p string
+        Ports to scan (e.g. 22,80,443,1000-2000)
   -r string
         Json request file
   -t int
