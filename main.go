@@ -124,7 +124,7 @@ func request(target string, port string, client *http.Client) (string, bool) {
 func search_patterns(text, search string) bool {
 	re, err := regexp.Compile(search)
 	if err != nil {
-		return strings.Contains(text, search)
+		return strings.Contains(string(text), search)
 	}
 	return re.MatchString(text)
 }
@@ -193,7 +193,7 @@ func main() {
 	flag.IntVar(&THREADS_COUNT, "t", 1000, "Thread count")
 	flag.StringVar(&iplist, "l", "", "List of ip")
 	flag.StringVar(&request_file, "r", "", "Json request file")
-	flag.BoolVar(&VERBOSE, "v", false, "Verbose")
+	flag.BoolVar(&VERBOSE, "v", true, "Verbose")
 	flag.BoolVar(&AUTOSCHEME, "a", false, "Auto URL scheme")
 	flag.StringVar(&PORTS, "p", "", "Ports to scan (e.g. 22, 80,443, 1000-2000)")
 	flag.Parse()

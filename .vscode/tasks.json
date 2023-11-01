@@ -1,0 +1,23 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "go",
+			"label": "go: build workspace",
+			"command": "build",
+			"args": [
+				"-ldflags",
+				"-s -w",
+				"-trimpath"
+			],
+			"problemMatcher": [
+				"$go"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"detail": "go build ."
+		}
+	]
+}
