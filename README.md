@@ -1,6 +1,7 @@
 # iot_detector
 A multithreaded scanner for detecting IoT devices, which allows you to identify a device on the Internet based on a specific request to it. This allows you to more accurately determine the device and avoid false positives or honeypot
 
+> Note: It's better to split the input list by 150k lines
 
 ## Usage
 ```bash
@@ -33,13 +34,9 @@ Usage of ./iot_detector:
 ```
 
 * `path` - A specific URL, when accessed, returns the model or version of the device
-
 * `method` - Request method GET or POST
-
 * `headers` - Request header
-
 * `data` - Post request body
-
 * `search` - Success detection pattern
 
 
